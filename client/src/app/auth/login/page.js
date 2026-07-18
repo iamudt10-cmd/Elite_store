@@ -28,7 +28,7 @@ function LoginContent() {
     if (typeof window !== 'undefined' && window.google) {
       try {
         window.google.accounts.id.initialize({
-          client_id: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '1027179047124-placeholder.apps.googleusercontent.com',
+          client_id: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '204701911248-3meavgl3ge83tbe3njba00dpd3dgg4d5.apps.googleusercontent.com',
           callback: async (response) => {
             if (response.credential) {
               const res = await googleLogin(response.credential);
