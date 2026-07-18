@@ -1,4 +1,5 @@
 import { Inter, Poppins } from 'next/font/google';
+import Script from 'next/script';
 import Header from '../components/layout/Header';
 import Footer from '../components/layout/Footer';
 import MobileNav from '../components/layout/MobileNav';
@@ -32,6 +33,9 @@ export default function RootLayout({ children }) {
         <div className="absolute top-[40%] right-[10%] w-[450px] h-[450px] rounded-full bg-lavender-200/25 filter blur-[100px] floating-blob" style={{ animationDelay: '-5s' }} />
         <div className="absolute bottom-[20%] left-[15%] w-[400px] h-[400px] rounded-full bg-baby-200/30 filter blur-[95px] floating-blob" style={{ animationDelay: '-10s' }} />
         <div className="absolute bottom-[5%] right-[5%] w-[300px] h-[300px] rounded-full bg-mint-200/25 filter blur-[80px] floating-blob" style={{ animationDelay: '-15s' }} />
+
+        {/* Google Identity Services SDK */}
+        <Script src="https://accounts.google.com/gsi/client" strategy="beforeInteractive" />
 
         {/* Global Razorpay payment sdk provider */}
         <RazorpayProvider>

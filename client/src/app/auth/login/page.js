@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useState } from 'react';
+import { Suspense, useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuthStore } from '../../../store/authStore';
@@ -13,7 +13,6 @@ import toast from 'react-hot-toast';
 function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { login } = useAuthStore();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -21,6 +20,43 @@ function LoginContent() {
   const [isLoading, setIsLoading] = useState(false);
 
   const redirectUrl = searchParams.get('redirect') || '/';
+
+  const { login, googleLogin } = useAuthStore();
+
+  // Initialize Google Identity Services
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.google) {
+      try {
+        window.google.accounts.id.initialize({
+          client_id: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '1027179047124-placeholder.apps.googleusercontent.com',
+          callback: async (response) => {
+            if (response.credential) {
+              const res = await googleLogin(response.credential);
+              if (res.success) {
+                toast.success('Signed in with Google successfully!');
+                router.push(redirectUrl);
+              } else {
+                toast.error(res.message || 'Google sign-in failed');
+              }
+            }
+          },
+        });
+
+        window.google.accounts.id.renderButton(
+          document.getElementById('google-signin-btn'),
+          { 
+            theme: 'outline', 
+            size: 'large', 
+            width: '100%', 
+            text: 'continue_with',
+            shape: 'rectangular'
+          }
+        );
+      } catch (err) {
+        console.warn('Google Identity Services initialization failed:', err);
+      }
+    }
+  }, [googleLogin, redirectUrl]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -92,6 +128,14 @@ function LoginContent() {
             Sign In
           </GlassButton>
         </form>
+
+        <div className="relative flex py-2 items-center">
+          <div className="flex-grow border-t border-white/20"></div>
+          <span className="flex-shrink mx-4 text-gray-400 text-[10px] font-bold uppercase tracking-wider select-none">Or continue with</span>
+          <div className="flex-grow border-t border-white/20"></div>
+        </div>
+
+        <div id="google-signin-btn" className="w-full flex justify-center py-1"></div>
 
         <div className="text-center text-xs text-gray-500 mt-2">
           Don&apos;t have an account?{' '}

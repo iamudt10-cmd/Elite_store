@@ -20,4 +20,5 @@ module.exports = {
     pass: process.env.SMTP_PASS,
   },
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
+  googleClientId: process.env.GOOGLE_CLIENT_ID,
 };

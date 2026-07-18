@@ -252,6 +252,89 @@ const resetPassword = async (req, res, next) => {
   }
 };
 
+const googleLogin = async (req, res, next) => {
+  try {
+    const { idToken } = req.body;
+    if (!idToken) {
+      return res.status(400).json({ success: false, message: 'Google ID Token is required' });
+    }
+
+    // Verify token with Google's public token info endpoint
+    const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${idToken}`);
+    const tokenInfo = await response.json();
+
+    if (tokenInfo.error || !tokenInfo.email) {
+      return res.status(400).json({ success: false, message: 'Invalid Google ID Token' });
+    }
+
+    // Google client ID verification (if configured)
+    if (config.googleClientId && tokenInfo.aud !== config.googleClientId) {
+      return res.status(400).json({ success: false, message: 'Token audience does not match Client ID' });
+    }
+
+    const { email, name, picture, email_verified } = tokenInfo;
+    const isEmailVerified = email_verified === 'true' || email_verified === true;
+
+    if (!isEmailVerified) {
+      return res.status(400).json({ success: false, message: 'Google email is not verified' });
+    }
+
+    // Check if user exists, else create new user
+    let user = await prisma.user.findUnique({ where: { email } });
+
+    if (!user) {
+      // Very first user is ADMIN, else USER
+      const userCount = await prisma.user.count();
+      const role = userCount === 0 ? 'ADMIN' : 'USER';
+      
+      // Random password since they login with Google
+      const randomPassword = crypto.randomBytes(16).toString('hex');
+      const hashedPassword = await bcrypt.hash(randomPassword, 10);
+
+      user = await prisma.user.create({
+        data: {
+          name: name || 'Google User',
+          email,
+          password: hashedPassword,
+          role,
+          avatar: picture || '',
+        }
+      });
+    }
+
+    const userResponse = {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      avatar: user.avatar,
+    };
+
+    const accessToken = generateAccessToken(userResponse);
+    const refreshToken = generateRefreshToken(userResponse);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { refreshToken },
+    });
+
+    res.cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      secure: config.nodeEnv === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    res.json({
+      success: true,
+      user: userResponse,
+      accessToken,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   register,
   login,
@@ -259,4 +342,5 @@ module.exports = {
   refreshToken,
   forgotPassword,
   resetPassword,
+  googleLogin,
 };

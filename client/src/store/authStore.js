@@ -41,6 +41,32 @@ export const useAuthStore = create()(
         }
       },
 
+      googleLogin: async (idToken) => {
+        set({ isLoading: true });
+        try {
+          const { data } = await axios.post(
+            `${API_URL}/auth/google`,
+            { idToken },
+            { withCredentials: true }
+          );
+          if (data.success) {
+            set({
+              user: data.user,
+              token: data.accessToken,
+              isAuthenticated: true,
+              isLoading: false,
+            });
+            return { success: true };
+          }
+        } catch (error) {
+          set({ isLoading: false });
+          return {
+            success: false,
+            message: error.response?.data?.message || 'Google login failed.',
+          };
+        }
+      },
+
       register: async (name, email, password) => {
         set({ isLoading: true });
         try {
