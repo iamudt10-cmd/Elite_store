@@ -25,31 +25,39 @@ const app = express();
 
 // Express Configuration with dynamic CORS handling to prevent blocks across preview domains
 const allowedOrigins = [
-  config.frontendUrl,
+  'https://elite-style.vercel.app',
+  'https://elite--style.vercel.app',
+  'https://elite-style-tkw8.onrender.com',
+  /^https:\/\/elite-.*\.vercel\.app$/,
   'http://localhost:3000',
-  'http://localhost:3001'
+  'http://localhost:3001',
 ];
 
 app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin) return callback(null, true);
-    
-    // Check if origin matches configured URL, localhost, or any vercel.app subdomain
-    const isAllowed = allowedOrigins.includes(origin) ||
-      origin.endsWith('.vercel.app') ||
-      origin.includes('localhost') ||
-      origin.includes('127.0.0.1');
-
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true); // allow non-browser requests
+    const isAllowed = allowedOrigins.some((allowed) =>
+      allowed instanceof RegExp ? allowed.test(origin) : allowed === origin
+    );
     if (isAllowed) {
       callback(null, true);
     } else {
-      // In case of mismatches, echo the origin in development or log warning
-      console.warn(`CORS request from unlisted origin: ${origin}`);
-      callback(null, true); // Allow dynamically for smooth user testing
+      callback(new Error(`CORS blocked for origin: ${origin}`));
     }
   },
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
+
+// Explicit preflight handler — safety net
+app.options('*', cors());
+
+// COOP fix for Google Sign-In popup issue
+app.use((req, res, next) => {
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+  next();
+});
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
