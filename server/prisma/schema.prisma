@@ -123,6 +123,7 @@ model Order {
   rejectedAt      DateTime?
   rejectedReason  String?
   isPaid          Boolean     @default(false)
+  paymentMethod   String      @default("RAZORPAY")
   trackingNumber  String?
   shippingCarrier String?
   deliveryStatus  String?
