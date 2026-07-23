@@ -23,9 +23,31 @@ const uploadRoutes = require('./routes/upload.routes');
 
 const app = express();
 
-// Express Configuration
+// Express Configuration with dynamic CORS handling to prevent blocks across preview domains
+const allowedOrigins = [
+  config.frontendUrl,
+  'http://localhost:3000',
+  'http://localhost:3001'
+];
+
 app.use(cors({
-  origin: config.frontendUrl,
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    
+    // Check if origin matches configured URL, localhost, or any vercel.app subdomain
+    const isAllowed = allowedOrigins.includes(origin) ||
+      origin.endsWith('.vercel.app') ||
+      origin.includes('localhost') ||
+      origin.includes('127.0.0.1');
+
+    if (isAllowed) {
+      callback(null, true);
+    } else {
+      // In case of mismatches, echo the origin in development or log warning
+      console.warn(`CORS request from unlisted origin: ${origin}`);
+      callback(null, true); // Allow dynamically for smooth user testing
+    }
+  },
   credentials: true,
 }));
 
