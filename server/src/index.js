@@ -98,11 +98,15 @@ app.use((req, res, next) => {
 // Centralized error handler
 app.use(errorHandler);
 
-const PORT = config.port;
-app.listen(PORT, () => {
-  console.log(`====================================================`);
-  console.log(`Elite Style Backend API listening on port ${PORT}`);
-  console.log(`Environment: ${config.nodeEnv}`);
-  console.log(`Frontend URL: ${config.frontendUrl}`);
-  console.log(`====================================================`);
-});
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+  const PORT = config.port || 5000;
+  app.listen(PORT, () => {
+    console.log(`====================================================`);
+    console.log(`Elite Style Backend API listening on port ${PORT}`);
+    console.log(`Environment: ${config.nodeEnv}`);
+    console.log(`Frontend URL: ${config.frontendUrl}`);
+    console.log(`====================================================`);
+  });
+}
+
+module.exports = app;
