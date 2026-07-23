@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import axios from 'axios';
+import { useUiStore } from './uiStore';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
 
@@ -11,12 +12,15 @@ export const useCartStore = create((set, get) => ({
   isLoading: false,
   promoCode: null,
   discountPercent: 0,
-  shippingThreshold: 5000,
-  shippingCostDefault: 150,
 
-  // Calculate totals helper
+  // Calculate totals helper — reads shipping config live from siteSettings
   getTotals: () => {
-    const { items, discountPercent, shippingThreshold, shippingCostDefault } = get();
+    const { items, discountPercent } = get();
+    // Read dynamic shipping config from uiStore (updated when admin changes settings)
+    const siteSettings = useUiStore.getState().siteSettings;
+    const shippingThreshold = parseFloat(siteSettings?.free_shipping_threshold || 5000);
+    const shippingCostDefault = parseFloat(siteSettings?.shipping_cost || 150);
+
     const subtotal = items.reduce((sum, item) => {
       const price = item.product?.price || 0;
       return sum + price * item.quantity;
