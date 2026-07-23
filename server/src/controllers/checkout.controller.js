@@ -125,6 +125,133 @@ const createRazorpayOrder = async (req, res, next) => {
   }
 };
 
+// ── COD Order: skip Razorpay entirely ──────────────────────────────────────────
+const createCODOrder = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const {
+      shippingName,
+      shippingStreet,
+      shippingCity,
+      shippingState,
+      shippingZip,
+      shippingCountry,
+      promoCode,
+    } = req.body;
+
+    if (!shippingName || !shippingStreet || !shippingCity || !shippingState || !shippingZip) {
+      return res.status(400).json({ success: false, message: 'All shipping details are required' });
+    }
+
+    const cartItems = await prisma.cartItem.findMany({
+      where: { userId },
+      include: { product: true },
+    });
+
+    if (cartItems.length === 0) {
+      return res.status(400).json({ success: false, message: 'Cart is empty' });
+    }
+
+    let subtotal = 0;
+    for (const item of cartItems) {
+      if (item.product.stock < item.quantity) {
+        return res.status(400).json({
+          success: false,
+          message: `Product "${item.product.name}" is out of stock.`,
+        });
+      }
+      subtotal += item.product.price * item.quantity;
+    }
+
+    let discount = 0;
+    if (promoCode) {
+      const code = await prisma.promoCode.findUnique({ where: { code: promoCode } });
+      if (code && code.active && (code.expiresAt === null || code.expiresAt > new Date()) && code.usedCount < code.maxUses) {
+        discount = (subtotal * code.discountPercent) / 100;
+      }
+    }
+
+    const shippingSetting = await prisma.siteSettings.findUnique({ where: { key: 'free_shipping_threshold' } });
+    const shippingCostSetting = await prisma.siteSettings.findUnique({ where: { key: 'shipping_cost' } });
+    const threshold = shippingSetting ? parseFloat(shippingSetting.value) : 1000;
+    const shippingFee = shippingCostSetting ? parseFloat(shippingCostSetting.value) : 150;
+    const shippingCost = subtotal >= threshold ? 0 : shippingFee;
+    const total = subtotal - discount + shippingCost;
+
+    const orderNumber = `EL-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`;
+
+    const order = await prisma.$transaction(async (tx) => {
+      // Stock check and deduction inside transaction
+      for (const item of cartItems) {
+        const product = await tx.product.findUnique({ where: { id: item.productId } });
+        if (!product || product.stock < item.quantity) {
+          throw new Error(`Oversold: ${item.product.name} has insufficient stock`);
+        }
+        await tx.product.update({
+          where: { id: item.productId },
+          data: { stock: { decrement: item.quantity } },
+        });
+      }
+
+      const dbOrder = await tx.order.create({
+        data: {
+          orderNumber,
+          userId,
+          status: 'ACCEPTED',
+          isPaid: false, // COD — paid on delivery
+          paymentMethod: 'COD',
+          subtotal,
+          discount,
+          shippingCost,
+          total,
+          shippingName,
+          shippingStreet,
+          shippingCity,
+          shippingState,
+          shippingZip,
+          shippingCountry: shippingCountry || 'IN',
+          promoCode,
+        },
+        include: { items: true },
+      });
+
+      for (const item of cartItems) {
+        await tx.orderItem.create({
+          data: {
+            orderId: dbOrder.id,
+            productId: item.productId,
+            quantity: item.quantity,
+            price: item.product.price,
+            size: item.size,
+            color: item.color,
+            name: item.product.name,
+            image: item.product.images[0] || null,
+          },
+        });
+      }
+
+      if (promoCode) {
+        await tx.promoCode.updateMany({
+          where: { code: promoCode },
+          data: { usedCount: { increment: 1 } },
+        });
+      }
+
+      // Clear cart
+      await tx.cartItem.deleteMany({ where: { userId } });
+
+      return dbOrder;
+    });
+
+    res.status(201).json({
+      success: true,
+      order,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 const verifyPromoCode = async (req, res, next) => {
   try {
     const { code } = req.body;
@@ -311,6 +438,7 @@ const handleShiprocketWebhook = async (req, res, next) => {
 
 module.exports = {
   createRazorpayOrder,
+  createCODOrder,
   verifyPromoCode,
   handleRazorpayWebhook,
   handleShiprocketWebhook,

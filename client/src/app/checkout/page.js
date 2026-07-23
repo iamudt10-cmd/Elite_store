@@ -97,11 +97,42 @@ export default function Checkout() {
 
   // Payment confirmation hook
   const handlePaymentSubmit = async (payload) => {
-    setPaymentDetails(payload); // Contains order id, payment id, signature
-    await handlePlaceOrder(payload);
+    if (payload.paymentMethod === 'COD') {
+      await handlePlaceCODOrder();
+    } else {
+      setPaymentDetails(payload);
+      await handlePlaceOrder(payload);
+    }
   };
 
-  // Place Final order database record (verifies payment signature)
+  // Place COD order — calls dedicated backend COD endpoint
+  const handlePlaceCODOrder = async () => {
+    setIsCreatingOrder(true);
+    try {
+      const { data } = await api.post('/checkout/create-cod-order', {
+        shippingName: shippingAddress.fullName,
+        shippingStreet: shippingAddress.street,
+        shippingCity: shippingAddress.city,
+        shippingState: shippingAddress.state,
+        shippingZip: shippingAddress.zipCode,
+        shippingCountry: shippingAddress.country || 'IN',
+        promoCode,
+      });
+
+      if (data.success) {
+        setPlacedOrder(data.order);
+        clearCart(token);
+        toast.success('COD order placed! Pay cash on delivery.');
+        setStep(4);
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to place COD order');
+    } finally {
+      setIsCreatingOrder(false);
+    }
+  };
+
+  // Place Final order database record (verifies Razorpay payment signature)
   const handlePlaceOrder = async (payload) => {
     setIsCreatingOrder(true);
     try {
