@@ -249,6 +249,71 @@ const deleteAddress = async (req, res, next) => {
   }
 };
 
+const getAllUsersAdmin = async (req, res, next) => {
+  try {
+    const users = await prisma.user.findMany({
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        avatar: true,
+        isBlocked: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    res.json({
+      success: true,
+      users,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const toggleUserBlockAdmin = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    const targetUser = await prisma.user.findUnique({
+      where: { id },
+    });
+
+    if (!targetUser) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    // Protect against self-blocking
+    if (targetUser.id === req.user.id) {
+      return res.status(400).json({ success: false, message: 'Administrators cannot block their own sessions.' });
+    }
+
+    const updated = await prisma.user.update({
+      where: { id },
+      data: {
+        isBlocked: !targetUser.isBlocked,
+        refreshToken: null, // Force logouts immediately upon blocking
+      },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        isBlocked: true,
+      },
+    });
+
+    res.json({
+      success: true,
+      user: updated,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getProfile,
   updateProfile,
@@ -259,4 +324,6 @@ module.exports = {
   createAddress,
   updateAddress,
   deleteAddress,
+  getAllUsersAdmin,
+  toggleUserBlockAdmin,
 };

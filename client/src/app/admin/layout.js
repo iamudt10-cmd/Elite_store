@@ -4,7 +4,7 @@ import { useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '../../store/authStore';
-import { FiGrid, FiBox, FiShoppingBag, FiSettings, FiArrowLeft, FiTruck } from 'react-icons/fi';
+import { FiGrid, FiBox, FiShoppingBag, FiSettings, FiArrowLeft, FiTruck, FiLayers, FiUsers, FiTag, FiStar } from 'react-icons/fi';
 import GlassCard from '../../components/ui/GlassCard';
 
 export default function AdminLayout({ children }) {
@@ -34,8 +34,12 @@ export default function AdminLayout({ children }) {
   const adminLinks = [
     { label: 'Overview Dashboard', href: '/admin', icon: FiGrid },
     { label: 'Manage Products', href: '/admin/products', icon: FiBox },
+    { label: 'Manage Categories', href: '/admin/categories', icon: FiLayers },
     { label: 'Manage Orders', href: '/admin/orders', icon: FiShoppingBag },
     { label: 'Manage Deliveries', href: '/admin/delivery', icon: FiTruck },
+    { label: 'Manage Customers', href: '/admin/customers', icon: FiUsers },
+    { label: 'Manage Promo Codes', href: '/admin/coupons', icon: FiTag },
+    { label: 'Moderation Reviews', href: '/admin/reviews', icon: FiStar },
     { label: 'Site Customizations', href: '/admin/settings', icon: FiSettings },
   ];
 

@@ -4,6 +4,7 @@ import { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuthStore } from '../../../store/authStore';
+import { useCartStore } from '../../../store/cartStore';
 import { FiUser, FiMail, FiLock, FiEye, FiEyeOff } from 'react-icons/fi';
 import GlassCard from '../../../components/ui/GlassCard';
 import GlassInput from '../../../components/ui/GlassInput';
@@ -43,6 +44,10 @@ function SignupContent() {
     setIsLoading(false);
     if (res.success) {
       toast.success('Account created successfully!');
+      const currentToken = useAuthStore.getState().token;
+      if (currentToken) {
+        await useCartStore.getState().syncGuestCart(currentToken);
+      }
       router.push(redirectUrl);
     } else {
       toast.error(res.message);

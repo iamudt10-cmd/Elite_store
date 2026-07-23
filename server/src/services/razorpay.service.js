@@ -64,7 +64,30 @@ const verifyPayment = (razorpayOrderId, razorpayPaymentId, razorpaySignature) =>
   }
 };
 
+const refundPayment = async (paymentId, amountInINR) => {
+  if (!razorpay || !paymentId || paymentId.startsWith('verify_dummy') || paymentId.includes('dummy')) {
+    return {
+      id: `rfnd_dummy_${Math.random().toString(36).substr(2, 9)}`,
+      entity: 'refund',
+      amount: amountInINR * 100,
+      status: 'processed',
+      demoMode: true
+    };
+  }
+
+  try {
+    const refund = await razorpay.payments.refund(paymentId, {
+      amount: Math.round(amountInINR * 100), // paise
+    });
+    return refund;
+  } catch (error) {
+    console.error('Razorpay Refund Error:', error);
+    throw new Error(`Refund failed: ${error.message}`);
+  }
+};
+
 module.exports = {
   createOrder,
   verifyPayment,
+  refundPayment,
 };

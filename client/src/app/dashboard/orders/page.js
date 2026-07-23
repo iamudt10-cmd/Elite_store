@@ -45,6 +45,7 @@ export default function UserOrders() {
       case 'ACCEPTED':
       case 'DELIVERED':
         return 'success';
+      case 'REFUNDED':
       case 'REJECTED':
       case 'CANCELLED':
         return 'danger';
@@ -190,6 +191,103 @@ export default function UserOrders() {
                         </div>
                       ))}
                     </div>
+                  </div>
+
+                  {/* Shipment Tracking Timeline */}
+                  <div className="border-t border-white/10 pt-4 mt-2">
+                    <h4 className="font-bold text-gray-700 uppercase tracking-wider text-[10px] mb-3">Shipment Tracking</h4>
+                    {order.trackingNumber ? (
+                      <div className="flex flex-col gap-4">
+                        <div className="bg-white/30 border border-white/40 p-3 rounded-2xl flex flex-wrap justify-between items-center text-xs">
+                          <div>
+                            <span className="text-gray-400 font-semibold uppercase text-[9px] block">Carrier Partner</span>
+                            <span className="font-bold text-gray-800">{order.shippingCarrier}</span>
+                          </div>
+                          <div>
+                            <span className="text-gray-400 font-semibold uppercase text-[9px] block">AWB Tracking Code</span>
+                            <span className="font-mono font-extrabold text-gray-800">{order.trackingNumber}</span>
+                          </div>
+                          {order.shippingLabelUrl && (
+                            <a
+                              href={`${api.defaults.baseURL.replace('/api', '')}${order.shippingLabelUrl}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs bg-lavender-500/10 border border-lavender-200 text-lavender-600 px-3 py-1.5 rounded-xl font-bold hover:bg-lavender-500/20 transition-all mt-2 sm:mt-0"
+                            >
+                              Print Label
+                            </a>
+                          )}
+                        </div>
+
+                        {/* Render RTO / Cancelled alert status if applicable */}
+                        {order.deliveryStatus === 'RTO' ? (
+                          <div className="bg-red-50 border border-red-100 p-3 rounded-2xl text-red-500 text-xs font-semibold">
+                            Return to Origin (RTO) Initiated: The parcel could not be delivered and is returning back to our warehouse.
+                          </div>
+                        ) : order.deliveryStatus === 'CANCELLED' ? (
+                          <div className="bg-red-50 border border-red-100 p-3 rounded-2xl text-red-500 text-xs font-semibold">
+                            Shipment Cancelled: Delivery dispatch has been recalled or cancelled.
+                          </div>
+                        ) : (
+                          /* Happy Path Timeline */
+                          <div className="grid grid-cols-5 gap-1.5 text-center mt-2 relative select-none">
+                            {/* Connector Lines */}
+                            <div className="absolute top-[13px] left-[10%] right-[10%] h-[2px] bg-white/30 z-0">
+                              <div
+                                className="h-full bg-mint-400 transition-all duration-500"
+                                style={{
+                                  width:
+                                    order.status === 'DELIVERED' || order.deliveryStatus === 'DELIVERED'
+                                      ? '100%'
+                                      : order.deliveryStatus === 'OUT_FOR_DELIVERY'
+                                      ? '75%'
+                                      : order.deliveryStatus === 'IN_TRANSIT'
+                                      ? '50%'
+                                      : order.deliveryStatus === 'PICKUP_GENERATED'
+                                      ? '25%'
+                                      : '0%',
+                                }}
+                              />
+                            </div>
+
+                            {/* Timeline Nodes */}
+                            {[
+                              { label: 'Confirmed', check: true },
+                              { label: 'Dispatched', check: ['PICKUP_GENERATED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED'].includes(order.deliveryStatus) },
+                              { label: 'In Transit', check: ['IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED'].includes(order.deliveryStatus) },
+                              { label: 'Out for Delivery', check: ['OUT_FOR_DELIVERY', 'DELIVERED'].includes(order.deliveryStatus) },
+                              { label: 'Delivered', check: order.status === 'DELIVERED' || order.deliveryStatus === 'DELIVERED' },
+                            ].map((node, i) => (
+                              <div key={i} className="flex flex-col items-center z-10">
+                                <div
+                                  className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold border transition-all ${
+                                    node.check
+                                      ? 'bg-mint-400 text-white border-transparent'
+                                      : 'glass bg-white/40 text-gray-400 border-white/30'
+                                  }`}
+                                >
+                                  {node.check ? '✓' : i + 1}
+                                </div>
+                                <span className={`text-[9px] md:text-[10px] font-bold mt-1.5 leading-tight ${node.check ? 'text-mint-600' : 'text-gray-400'}`}>
+                                  {node.label}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      /* Preparing Order sensible fallback */
+                      <div className="bg-lavender-50/50 border border-lavender-100/50 p-4 rounded-2xl flex flex-col gap-1.5 text-xs text-left">
+                        <div className="flex items-center gap-2 text-lavender-600 font-bold">
+                          <span className="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full" />
+                          <span>Preparing Your Package</span>
+                        </div>
+                        <p className="text-gray-400">
+                          We are carefully inspecting, packing, and preparing your order items at our central hub. Tracking waybill will update here as soon as the courier pick-up is scheduled.
+                        </p>
+                      </div>
+                    )}
                   </div>
 
                   {/* Calculations row */}

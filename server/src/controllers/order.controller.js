@@ -1,6 +1,7 @@
 const prisma = require('../config/db');
 const { generateOrderNumber } = require('../utils/tokens');
 const razorpayService = require('../services/razorpay.service');
+const shiprocketService = require('../services/shiprocket.service');
 const emailService = require('../services/email.service');
 
 const getUserOrders = async (req, res, next) => {
@@ -60,17 +61,14 @@ const createOrder = async (req, res, next) => {
   try {
     const userId = req.user.id;
     const {
-      shippingName,
-      shippingStreet,
-      shippingCity,
-      shippingState,
-      shippingZip,
-      shippingCountry,
       razorpayOrderId,
       razorpayPaymentId,
       razorpaySignature,
-      promoCode,
     } = req.body;
+
+    if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
+      return res.status(400).json({ success: false, message: 'Missing payment signature details' });
+    }
 
     // 1. Verify Razorpay Payment Signature
     const isPaymentVerified = razorpayService.verifyPayment(
@@ -83,92 +81,35 @@ const createOrder = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Payment verification failed. Security mismatch.' });
     }
 
-    // 2. Fetch User's Cart
-    const cartItems = await prisma.cartItem.findMany({
-      where: { userId },
-      include: { product: true },
+    // 2. Find pre-saved PENDING order
+    const order = await prisma.order.findFirst({
+      where: { razorpayOrderId },
+      include: { items: true },
     });
 
-    if (cartItems.length === 0) {
-      return res.status(400).json({ success: false, message: 'Cannot place order with an empty cart' });
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'Order reference not found' });
     }
 
-    // 3. Verify Stock and Calculate Totals
-    let subtotal = 0;
-    for (const item of cartItems) {
-      if (item.product.stock < item.quantity) {
-        return res.status(400).json({
-          success: false,
-          message: `Product ${item.product.name} does not have enough stock.`,
-        });
-      }
-      subtotal += item.product.price * item.quantity;
-    }
-
-    // 4. Handle Promo Code
-    let discount = 0;
-    if (promoCode) {
-      const code = await prisma.promoCode.findUnique({
-        where: { code: promoCode },
+    // 3. Idempotency Check: if webhook already completed the checkout
+    if (order.isPaid) {
+      return res.status(200).json({
+        success: true,
+        order,
       });
-
-      if (code && code.active && (code.expiresAt === null || code.expiresAt > new Date()) && code.usedCount < code.maxUses) {
-        discount = (subtotal * code.discountPercent) / 100;
-        
-        // Increment promo code use count
-        await prisma.promoCode.update({
-          where: { id: code.id },
-          data: { usedCount: { increment: 1 } },
-        });
-      }
     }
 
-    // Fetch site shipping threshold
-    const shippingSetting = await prisma.siteSettings.findUnique({ where: { key: 'free_shipping_threshold' } });
-    const threshold = shippingSetting ? parseFloat(shippingSetting.value) : 1000;
-    const shippingCost = subtotal >= threshold ? 0 : 150; // default shipping fee in INR is 150
-    const total = subtotal - discount + shippingCost;
-
-    const orderNumber = generateOrderNumber();
-
-    // 5. Create Order and OrderItems in Transaction, Update Stock
-    const result = await prisma.$transaction(async (tx) => {
-      // Create Order
-      const order = await tx.order.create({
-        data: {
-          orderNumber,
-          userId,
-          status: 'PENDING',
-          subtotal,
-          discount,
-          shippingCost,
-          total,
-          shippingName,
-          shippingStreet,
-          shippingCity,
-          shippingState,
-          shippingZip,
-          shippingCountry,
-          razorpayOrderId,
-          razorpayPaymentId,
-          promoCode,
-        },
-      });
-
-      // Create OrderItems & Update Stock
-      for (const item of cartItems) {
-        await tx.orderItem.create({
-          data: {
-            orderId: order.id,
-            productId: item.productId,
-            quantity: item.quantity,
-            price: item.product.price,
-            size: item.size,
-            color: item.color,
-            name: item.product.name,
-            image: item.product.images[0] || null,
-          },
+    // 4. Update order, adjust stock, and increment coupon usage inside transaction
+    const updatedOrder = await prisma.$transaction(async (tx) => {
+      // Double check stock levels for all items inside transaction before committing
+      for (const item of order.items) {
+        const product = await tx.product.findUnique({
+          where: { id: item.productId },
         });
+
+        if (!product || product.stock < item.quantity) {
+          throw new Error(`Oversold Alert: ${item.name} has insufficient stock. available: ${product?.stock || 0}`);
+        }
 
         // Reduce stock
         await tx.product.update({
@@ -177,26 +118,39 @@ const createOrder = async (req, res, next) => {
         });
       }
 
+      // Update order status to paid
+      const dbOrder = await tx.order.update({
+        where: { id: order.id },
+        data: {
+          isPaid: true,
+          status: 'ACCEPTED',
+          razorpayPaymentId,
+        },
+        include: { items: true },
+      });
+
+      // Update coupon uses if applied
+      if (dbOrder.promoCode) {
+        await tx.promoCode.updateMany({
+          where: { code: dbOrder.promoCode },
+          data: { usedCount: { increment: 1 } },
+        });
+      }
+
       // Clear User Cart
       await tx.cartItem.deleteMany({ where: { userId } });
 
-      return order;
-    });
-
-    // Fetch the created order with items to send email
-    const fullOrder = await prisma.order.findUnique({
-      where: { id: result.id },
-      include: { items: true },
+      return dbOrder;
     });
 
     // Trigger email send asynchronously (non-blocking)
-    emailService.sendOrderConfirmation(fullOrder, req.user).catch((err) => {
+    emailService.sendOrderConfirmation(updatedOrder, req.user).catch((err) => {
       console.error('Asynchronous order email failed:', err);
     });
 
     res.status(201).json({
       success: true,
-      order: fullOrder,
+      order: updatedOrder,
     });
   } catch (error) {
     next(error);
@@ -238,6 +192,22 @@ const updateOrderStatus = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { status, adminNote } = req.body;
+
+    const existingOrder = await prisma.order.findUnique({
+      where: { id },
+    });
+
+    if (!existingOrder) {
+      return res.status(404).json({ success: false, message: 'Order not found' });
+    }
+
+    const terminalStatuses = ['DELIVERED', 'REJECTED', 'CANCELLED'];
+    if (terminalStatuses.includes(existingOrder.status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Order status cannot be modified. The order has already reached a final status: ${existingOrder.status}`,
+      });
+    }
 
     const order = await prisma.order.update({
       where: { id },
@@ -338,20 +308,22 @@ const shipOrder = async (req, res, next) => {
 
     const order = await prisma.order.findUnique({
       where: { id },
-      include: { user: true }
+      include: { user: true, items: true },
     });
 
     if (!order) {
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
-    // Generate simulated tracking number and partner order reference
-    const prefix = carrier === 'Delhivery' ? 'DEL' : carrier === 'Shiprocket' ? 'SR' : 'TRK';
-    const randomSuffix = Math.floor(1000000000 + Math.random() * 9000000000);
-    const trackingNumber = `${prefix}${randomSuffix}`;
-    const deliveryPartnerOrderId = `SHP-${order.orderNumber}-${Math.floor(100 + Math.random() * 900)}`;
+    // Call Shiprocket Order Creation API (will validate data & throw on failure)
+    const parsedWeight = parseFloat(weight) || 0.5;
+    const bookingResult = await shiprocketService.createOrder(order, parsedWeight);
 
-    // Create a mock shipping label URL that links to our beautiful CSS printable page representation
+    // Call Shiprocket AWB Assignment API to allocate a real tracking waybill
+    const awbResult = await shiprocketService.assignAWB(bookingResult.shipment_id, carrier);
+
+    const trackingNumber = awbResult.awb_code;
+    const deliveryPartnerOrderId = String(bookingResult.order_id);
     const shippingLabelUrl = `/admin/delivery/label/${order.id}`;
 
     const updatedOrder = await prisma.order.update({
@@ -359,11 +331,11 @@ const shipOrder = async (req, res, next) => {
       data: {
         status: 'SHIPPED',
         deliveryStatus: 'DISPATCHED',
-        shippingCarrier: carrier,
+        shippingCarrier: awbResult.courier_name || carrier,
         trackingNumber,
         deliveryPartnerOrderId,
         shippingLabelUrl,
-        adminNote: `Package handed over to ${carrier} (${serviceType || 'Standard'}). Waybill generated: ${trackingNumber}.`,
+        adminNote: `Package handed over to ${awbResult.courier_name || carrier} (${serviceType || 'Standard'}). Waybill generated: ${trackingNumber}.`,
       },
     });
 
@@ -485,6 +457,59 @@ const togglePaymentPaid = async (req, res, next) => {
   }
 };
 
+const refundOrder = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    const order = await prisma.order.findUnique({
+      where: { id },
+      include: { items: true },
+    });
+
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'Order not found' });
+    }
+
+    if (!order.isPaid) {
+      return res.status(400).json({ success: false, message: 'Unpaid orders cannot be refunded' });
+    }
+
+    if (order.status === 'REFUNDED') {
+      return res.status(400).json({ success: false, message: 'Order has already been refunded' });
+    }
+
+    // Process payment refund via Razorpay API (supports demo/sandbox mocks)
+    await razorpayService.refundPayment(order.razorpayPaymentId, order.total);
+
+    // Update database and restore stock in transaction
+    const updated = await prisma.$transaction(async (tx) => {
+      // Restore stock
+      for (const item of order.items) {
+        await tx.product.update({
+          where: { id: item.productId },
+          data: { stock: { increment: item.quantity } },
+        });
+      }
+
+      return await tx.order.update({
+        where: { id },
+        data: {
+          status: 'REFUNDED',
+        },
+        include: { items: true },
+      });
+    });
+
+    res.json({
+      success: true,
+      message: 'Order refunded successfully and stock levels restored',
+      order: updated,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getUserOrders,
   getOrderById,
@@ -496,4 +521,5 @@ module.exports = {
   shipOrder,
   updateDeliveryStatus,
   togglePaymentPaid,
+  refundOrder,
 };

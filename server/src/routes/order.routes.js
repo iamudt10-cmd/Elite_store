@@ -16,5 +16,6 @@ router.put('/:id/reject', requireAdmin, orderController.rejectOrder);
 router.put('/:id/ship', requireAdmin, orderController.shipOrder);
 router.put('/:id/delivery-status', requireAdmin, orderController.updateDeliveryStatus);
 router.put('/:id/toggle-paid', requireAdmin, orderController.togglePaymentPaid);
+router.put('/:id/refund', requireAdmin, orderController.refundOrder);
 
 module.exports = router;

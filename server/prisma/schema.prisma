@@ -20,6 +20,7 @@ enum OrderStatus {
   SHIPPED
   DELIVERED
   CANCELLED
+  REFUNDED
 }
 
 model User {
@@ -32,6 +33,7 @@ model User {
   refreshToken String?
   resetToken   String?
   resetExpires DateTime?
+  isBlocked    Boolean   @default(false)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 

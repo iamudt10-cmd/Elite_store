@@ -122,6 +122,26 @@ export default function AdminOrders() {
     }
   };
 
+  const handleRefund = async (id) => {
+    if (!confirm('Are you sure you want to refund this order? This will process a return transaction on Razorpay and restore the catalog stock.')) {
+      return;
+    }
+
+    setActionLoading(true);
+    try {
+      const { data } = await api.put(`/orders/${id}/refund`);
+      if (data.success) {
+        toast.success('Order refunded successfully. Stock levels restored.');
+        fetchOrders();
+        setDetailModalOpen(false);
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to refund order');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const viewOrderDetails = (order) => {
     setSelectedOrder(order);
     setDetailModalOpen(true);
@@ -134,6 +154,8 @@ export default function AdminOrders() {
       case 'ACCEPTED':
       case 'DELIVERED':
         return 'success';
+      case 'REFUNDED':
+        return 'danger';
       case 'REJECTED':
       case 'CANCELLED':
         return 'danger';
@@ -371,6 +393,20 @@ export default function AdminOrders() {
                 <span className="text-lavender-600">{symbol}{selectedOrder.total.toLocaleString('en-IN')}</span>
               </div>
             </div>
+
+            {selectedOrder.isPaid && selectedOrder.status !== 'REFUNDED' && (
+              <div className="flex justify-end mt-4 pt-4 border-t border-white/10">
+                <GlassButton
+                  type="button"
+                  variant="danger"
+                  size="sm"
+                  loading={actionLoading}
+                  onClick={() => handleRefund(selectedOrder.id)}
+                >
+                  Refund Payment
+                </GlassButton>
+              </div>
+            )}
           </div>
         )}
       </GlassModal>

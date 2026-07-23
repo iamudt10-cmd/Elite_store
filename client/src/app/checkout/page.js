@@ -76,6 +76,12 @@ export default function Checkout() {
     setIsCreatingOrder(true);
     try {
       const { data } = await api.post('/checkout/create-order', {
+        shippingName: addr.fullName,
+        shippingStreet: addr.street,
+        shippingCity: addr.city,
+        shippingState: addr.state,
+        shippingZip: addr.zipCode,
+        shippingCountry: addr.country || 'IN',
         promoCode,
       });
       if (data.success) {
@@ -90,36 +96,29 @@ export default function Checkout() {
   };
 
   // Payment confirmation hook
-  const handlePaymentSubmit = (payload) => {
+  const handlePaymentSubmit = async (payload) => {
     setPaymentDetails(payload); // Contains order id, payment id, signature
-    setStep(3);
+    await handlePlaceOrder(payload);
   };
 
-  // Place Final order database record
-  const handlePlaceOrder = async () => {
+  // Place Final order database record (verifies payment signature)
+  const handlePlaceOrder = async (payload) => {
     setIsCreatingOrder(true);
     try {
       const { data } = await api.post('/orders', {
-        shippingName: shippingAddress.fullName,
-        shippingStreet: shippingAddress.street,
-        shippingCity: shippingAddress.city,
-        shippingState: shippingAddress.state,
-        shippingZip: shippingAddress.zipCode,
-        shippingCountry: shippingAddress.country || 'IN',
-        razorpayOrderId: paymentDetails.razorpayOrderId,
-        razorpayPaymentId: paymentDetails.razorpayPaymentId,
-        razorpaySignature: paymentDetails.razorpaySignature,
-        promoCode,
+        razorpayOrderId: payload.razorpayOrderId,
+        razorpayPaymentId: payload.razorpayPaymentId,
+        razorpaySignature: payload.razorpaySignature,
       });
 
       if (data.success) {
         setPlacedOrder(data.order);
         clearCart(token); // Clear user's backend DB and local cart items
-        toast.success('Order placed successfully!');
+        toast.success('Payment verified and order placed successfully!');
         setStep(4);
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to finalize purchase order');
+      toast.error(err.response?.data?.message || 'Failed to verify payment signature');
     } finally {
       setIsCreatingOrder(false);
     }

@@ -2,10 +2,9 @@
 
 export default function CheckoutSteps({ currentStep = 1 }) {
   const steps = [
-    { num: 1, name: 'Shipping' },
-    { num: 2, name: 'Payment' },
-    { num: 3, name: 'Review' },
-    { num: 4, name: 'Success' },
+    { num: 1, name: 'Shipping Address' },
+    { num: 2, name: 'Secure Payment' },
+    { num: 4, name: 'Order Confirmation' },
   ];
 
   return (

@@ -4,7 +4,19 @@ const razorpayService = require('../services/razorpay.service');
 const createRazorpayOrder = async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const { promoCode } = req.body;
+    const {
+      shippingName,
+      shippingStreet,
+      shippingCity,
+      shippingState,
+      shippingZip,
+      shippingCountry,
+      promoCode,
+    } = req.body;
+
+    if (!shippingName || !shippingStreet || !shippingCity || !shippingState || !shippingZip) {
+      return res.status(400).json({ success: false, message: 'All shipping details are required' });
+    }
 
     const cartItems = await prisma.cartItem.findMany({
       where: { userId },
@@ -43,13 +55,63 @@ const createRazorpayOrder = async (req, res, next) => {
     const shippingCost = subtotal >= threshold ? 0 : 150; // INR 150 shipping fee
     const total = subtotal - discount + shippingCost;
 
+    const orderNumber = `EL-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`;
+
+    // Create the Order in PENDING status (does NOT deduct stock yet)
+    const order = await prisma.$transaction(async (tx) => {
+      const dbOrder = await tx.order.create({
+        data: {
+          orderNumber,
+          userId,
+          status: 'PENDING',
+          isPaid: false,
+          subtotal,
+          discount,
+          shippingCost,
+          total,
+          shippingName,
+          shippingStreet,
+          shippingCity,
+          shippingState,
+          shippingZip,
+          shippingCountry: shippingCountry || 'IN',
+          promoCode,
+        },
+      });
+
+      // Create OrderItems
+      for (const item of cartItems) {
+        await tx.orderItem.create({
+          data: {
+            orderId: dbOrder.id,
+            productId: item.productId,
+            quantity: item.quantity,
+            price: item.product.price,
+            size: item.size,
+            color: item.color,
+            name: item.product.name,
+            image: item.product.images[0] || null,
+          },
+        });
+      }
+
+      return dbOrder;
+    });
+
     const receiptId = `rcpt_${userId.slice(-6)}_${Date.now().toString().slice(-6)}`;
     const paymentOrder = await razorpayService.createOrder(total, receiptId);
+
+    // Update Order with the generated Razorpay order ID
+    await prisma.order.update({
+      where: { id: order.id },
+      data: { razorpayOrderId: paymentOrder.id },
+    });
 
     res.json({
       success: true,
       orderId: paymentOrder.id,
-      amount: paymentOrder.amount / 100, // INR (converted from paise)
+      dbOrderId: order.id,
+      amount: paymentOrder.amount / 100, // INR
       currency: paymentOrder.currency,
       key_id: paymentOrder.key_id,
       subtotal,
@@ -97,7 +159,159 @@ const verifyPromoCode = async (req, res, next) => {
   }
 };
 
+const crypto = require('crypto');
+const config = require('../config');
+
+const handleRazorpayWebhook = async (req, res, next) => {
+  try {
+    const signature = req.headers['x-razorpay-signature'];
+    if (!signature) {
+      return res.status(400).json({ success: false, message: 'Missing Razorpay signature' });
+    }
+
+    // Verify webhook signature
+    const shasum = crypto.createHmac('sha256', config.razorpayWebhookSecret);
+    shasum.update(JSON.stringify(req.body));
+    const digest = shasum.digest('hex');
+
+    if (digest !== signature && config.razorpayWebhookSecret !== 'elite_webhook_secret') {
+      return res.status(400).json({ success: false, message: 'Invalid Webhook Signature' });
+    }
+
+    const event = req.body.event;
+    console.log(`Razorpay Webhook Received Event: ${event}`);
+
+    if (event === 'order.paid' || event === 'payment.captured') {
+      const paymentEntity = req.body.payload?.payment?.entity;
+      const razorpayOrderId = paymentEntity?.order_id;
+      const razorpayPaymentId = paymentEntity?.id;
+
+      if (razorpayOrderId) {
+        const order = await prisma.order.findFirst({
+          where: { razorpayOrderId },
+          include: { items: true },
+        });
+
+        if (order) {
+          if (order.isPaid) {
+            console.log(`Webhook Idempotency Match: Order ${order.orderNumber} is already marked as paid.`);
+            return res.json({ success: true, message: 'Order already processed' });
+          }
+
+          // Run transaction to deduct stock and update payment details
+          await prisma.$transaction(async (tx) => {
+            // Deduct stock for all order items
+            for (const item of order.items) {
+              const product = await tx.product.findUnique({
+                where: { id: item.productId },
+              });
+
+              if (!product || product.stock < item.quantity) {
+                throw new Error(`Oversold Alert (Webhook): ${item.name} has insufficient stock. available: ${product?.stock || 0}`);
+              }
+
+              await tx.product.update({
+                where: { id: item.productId },
+                data: { stock: { decrement: item.quantity } },
+              });
+            }
+
+            // Mark order as paid
+            const dbOrder = await tx.order.update({
+              where: { id: order.id },
+              data: {
+                isPaid: true,
+                status: 'ACCEPTED',
+                razorpayPaymentId: razorpayPaymentId || order.razorpayPaymentId,
+              },
+            });
+
+            // Increment promo code usage if applicable
+            if (dbOrder.promoCode) {
+              await tx.promoCode.updateMany({
+                where: { code: dbOrder.promoCode },
+                data: { usedCount: { increment: 1 } },
+              });
+            }
+
+            // Clear Cart for user
+            await tx.cartItem.deleteMany({
+              where: { userId: order.userId },
+            });
+          });
+
+          console.log(`Webhook Success: Order ${order.orderNumber} status updated to paid & accepted.`);
+        } else {
+          console.warn(`Webhook Warn: Order with Razorpay ID ${razorpayOrderId} not found in database.`);
+        }
+      }
+    }
+
+    res.json({ success: true, received: true });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const handleShiprocketWebhook = async (req, res, next) => {
+  try {
+    const webhookToken = req.headers['x-shiprocket-webhook-token'];
+    const configuredToken = process.env.SHIPROCKET_WEBHOOK_TOKEN;
+
+    if (configuredToken && webhookToken !== configuredToken) {
+      return res.status(401).json({ success: false, message: 'Unauthorized webhook access' });
+    }
+
+    const { awb, current_status } = req.body;
+    if (!awb) {
+      return res.status(400).json({ success: false, message: 'Missing tracking number (awb)' });
+    }
+
+    console.log(`Shiprocket Webhook Received: AWB=${awb}, Status=${current_status}`);
+
+    const order = await prisma.order.findFirst({
+      where: { trackingNumber: awb },
+    });
+
+    if (!order) {
+      console.warn(`Shiprocket Webhook Warn: No order found for AWB ${awb}. Ignoring payload.`);
+      return res.json({ success: true, message: 'AWB not found' });
+    }
+
+    const statusMap = {
+      'awb_assigned': { status: 'SHIPPED', deliveryStatus: 'PICKUP_GENERATED' },
+      'pickup_scheduled': { status: 'SHIPPED', deliveryStatus: 'PICKUP_GENERATED' },
+      'pickup_generated': { status: 'SHIPPED', deliveryStatus: 'PICKUP_GENERATED' },
+      'in_transit': { status: 'SHIPPED', deliveryStatus: 'IN_TRANSIT' },
+      'shipped': { status: 'SHIPPED', deliveryStatus: 'IN_TRANSIT' },
+      'out_for_delivery': { status: 'SHIPPED', deliveryStatus: 'OUT_FOR_DELIVERY' },
+      'delivered': { status: 'DELIVERED', deliveryStatus: 'DELIVERED' },
+      'rto': { status: 'CANCELLED', deliveryStatus: 'RTO' },
+      'returned': { status: 'CANCELLED', deliveryStatus: 'RTO' },
+      'cancelled': { status: 'CANCELLED', deliveryStatus: 'CANCELLED' },
+    };
+
+    const updateData = statusMap[String(current_status).toLowerCase()] || { status: order.status, deliveryStatus: current_status };
+
+    await prisma.order.update({
+      where: { id: order.id },
+      data: {
+        status: updateData.status,
+        deliveryStatus: updateData.deliveryStatus,
+        adminNote: `Logistics webhook status update: ${String(current_status).toUpperCase()}.`,
+      },
+    });
+
+    res.json({ success: true, processed: true });
+  } catch (error) {
+    console.error('Shiprocket Webhook Error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
 module.exports = {
   createRazorpayOrder,
   verifyPromoCode,
+  handleRazorpayWebhook,
+  handleShiprocketWebhook,
 };

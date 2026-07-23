@@ -4,6 +4,7 @@ import { Suspense, useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuthStore } from '../../../store/authStore';
+import { useCartStore } from '../../../store/cartStore';
 import { FiMail, FiLock, FiEye, FiEyeOff } from 'react-icons/fi';
 import GlassCard from '../../../components/ui/GlassCard';
 import GlassInput from '../../../components/ui/GlassInput';
@@ -34,6 +35,10 @@ function LoginContent() {
               const res = await googleLogin(response.credential);
               if (res.success) {
                 toast.success('Signed in with Google successfully!');
+                const currentToken = useAuthStore.getState().token;
+                if (currentToken) {
+                  await useCartStore.getState().syncGuestCart(currentToken);
+                }
                 router.push(redirectUrl);
               } else {
                 toast.error(res.message || 'Google sign-in failed');
@@ -69,6 +74,10 @@ function LoginContent() {
     setIsLoading(false);
     if (res.success) {
       toast.success('Logged in successfully!');
+      const currentToken = useAuthStore.getState().token;
+      if (currentToken) {
+        await useCartStore.getState().syncGuestCart(currentToken);
+      }
       router.push(redirectUrl);
     } else {
       toast.error(res.message);

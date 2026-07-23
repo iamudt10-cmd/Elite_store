@@ -21,4 +21,7 @@ module.exports = {
   },
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
   googleClientId: process.env.GOOGLE_CLIENT_ID,
+  razorpayWebhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET || 'elite_webhook_secret',
+  shiprocketEmail: process.env.SHIPROCKET_EMAIL,
+  shiprocketPassword: process.env.SHIPROCKET_PASSWORD,
 };

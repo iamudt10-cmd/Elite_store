@@ -111,6 +111,26 @@ export default function AdminDashboard() {
         </GlassCard>
       </div>
 
+      {/* Low Stock Alert Center */}
+      {stats?.lowStockProducts && stats.lowStockProducts.length > 0 && (
+        <GlassCard className="p-4 border-red-200/40 bg-red-500/5 flex flex-col md:flex-row gap-4 items-start md:items-center justify-between text-left" hover={false}>
+          <div className="flex items-center gap-3">
+            <span className="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center text-red-500 font-extrabold animate-pulse">!</span>
+            <div>
+              <h4 className="text-sm font-bold text-gray-800">Low-Stock Alert Warning</h4>
+              <p className="text-xs text-gray-400 mt-0.5">The following items require urgent restock to prevent sell-out:</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {stats.lowStockProducts.map((p) => (
+              <span key={p.id} className="bg-red-50 border border-red-100 text-red-500 font-semibold text-xs px-2.5 py-1 rounded-full flex items-center gap-1.5">
+                {p.name}: <strong className="font-extrabold">{p.stock} units left</strong>
+              </span>
+            ))}
+          </div>
+        </GlassCard>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Sales Daily chart */}
         <GlassCard className="lg:col-span-2 p-6 flex flex-col gap-4 h-96" hover={false}>
